@@ -39,9 +39,12 @@
 
 ```
 kazu-racer/
-├── index.html      # 全部これ1枚（HTML + CSS + JS）
+├── index.html            # 全部これ1枚（HTML + CSS + JS）
 ├── assets/
-│   └── kazu.png    # kazu-lazer から流用
+│   ├── kazu.png          # kazu-lazer から流用。他が無いときのフォールバック
+│   ├── kazu-side.png     # コースを走る右向きのカズ
+│   └── kazu-flag.png     # 1位のときリザルトに出る、旗を掲げたカズ
+├── tools/art/            # 上記スプライトの生成スクリプト（Pillow）
 ├── README.md
 └── PROGRESS.md
 ```
