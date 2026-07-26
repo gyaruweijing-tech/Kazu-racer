@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>カズレーサー</title>
+<style>
+  :root{
+    --bg:#f2f4f8;
+    --card:#ffffff;
+    --ink:#15181e;
+    --muted:#6b7480;
+    --line:#e2e7ef;
+    --road:#eef1f6;
+    --road2:#e5eaf2;
+    --red:#e11d48;
+    --green:#16a34a;
+    --blue:#2563eb;
+    --checker:16px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%}
+  body{
+    background:var(--bg);color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",YuGothic,Meiryo,system-ui,sans-serif;
+    display:flex;align-items:center;justify-content:center;
+    overflow:hidden;user-select:none;
+  }
+  #app{
+    width:min(100vw,860px);height:min(100vh,940px);
+    position:relative;background:var(--card);
+    box-shadow:0 10px 40px rgba(20,30,60,.10);
+    overflow:hidden;
+  }
+  .screen{
+    position:absolute;inset:0;display:none;
+    flex-direction:column;align-items:center;justify-content:center;
+    padding:22px;gap:16px;text-align:center;
+  }
+  .screen.show{display:flex}
+
+  /* ---------- チェッカーフラッグ ---------- */
+  .checker{
+    background:repeating-conic-gradient(#12151a 0 25%,#fff 0 50%) 0 0 / var(--checker) var(--checker);
+  }
+  .band{
+    position:absolute;left:0;right:0;height:22px;
+    border-top:2px solid var(--ink);border-bottom:2px solid var(--ink);
+  }
+  .band.top{top:0}
+  .band.bottom{bottom:0}
+  .band.wave{animation:wave 6s linear infinite}
+  @keyframes wave{to{background-position:calc(var(--checker) * 4) 0}}
+
+  /* ---------- タイトル ---------- */
+  .kazu-title{
+    width:clamp(104px,26vw,150px);border-radius:50%;
+    box-shadow:0 0 0 5px #fff,0 0 0 8px var(--ink),0 10px 24px rgba(20,30,60,.22);
+    animation:idle 1.8s ease-in-out infinite;
+  }
+  @keyframes idle{50%{transform:translateY(-9px) rotate(-4deg)}}
+  .logo{
+    font-size:clamp(38px,10.5vw,70px);font-weight:900;letter-spacing:.02em;
+    transform:skewX(-8deg);color:var(--ink);line-height:1.05;
+  }
+  .logo em{font-style:normal;color:var(--red)}
+  .logo-rule{width:min(320px,70%);height:14px;border:2px solid var(--ink);margin:8px auto 0}
+  .sub{color:var(--muted);font-size:13px;letter-spacing:.18em;margin-top:8px}
+  .lead{font-size:15px;color:var(--muted);line-height:1.8}
+  .lead b{color:var(--ink);background:#fff3c4;padding:1px 7px;border-radius:5px;font-family:ui-monospace,Menlo,Consolas,monospace}
+  .btn{
+    padding:15px 34px;border:2px solid var(--ink);border-radius:999px;
+    font-size:19px;font-weight:800;font-family:inherit;cursor:pointer;
+    background:var(--red);color:#fff;
+    box-shadow:0 6px 0 var(--ink);transition:transform .08s,box-shadow .08s;
+  }
+  .btn:active{transform:translateY(4px);box-shadow:0 2px 0 var(--ink)}
+  .btn.ghost{background:#fff;color:var(--ink);box-shadow:0 6px 0 #c9d0da}
+  .best{font-size:13px;color:var(--muted)}
+
+  /* ---------- ゲーム ---------- */
+  #game{justify-content:flex-start;gap:12px;padding:34px 20px 20px}
+  .lights{display:flex;gap:11px}
+  .lamp{
+    width:clamp(24px,6.4vw,36px);height:clamp(24px,6.4vw,36px);border-radius:50%;
+    background:#e6eaf1;border:3px solid var(--ink);transition:.1s;
+  }
+  .lamp.on{background:var(--red);box-shadow:0 0 16px rgba(225,29,72,.6)}
+  .callout{
+    height:34px;font-size:clamp(17px,4.6vw,25px);font-weight:900;letter-spacing:.06em;
+    display:flex;align-items:center;color:var(--muted);
+  }
+  .callout.go{color:var(--green)}
+  .callout.ng{color:var(--red)}
+
+  /* タイピング入力ボックス */
+  .wordbox{
+    width:100%;max-width:520px;padding:14px 18px;border:3px solid var(--ink);
+    border-radius:14px;background:#fff;box-shadow:0 5px 0 #dfe4ec;
+    display:flex;flex-direction:column;gap:6px;align-items:center;
+    transition:transform .06s;
+  }
+  .wordbox.miss{animation:shake .22s;border-color:var(--red);background:#fff1f4}
+  @keyframes shake{25%{transform:translateX(-7px)}75%{transform:translateX(7px)}}
+  .word{
+    font-family:ui-monospace,Menlo,Consolas,monospace;
+    font-size:clamp(30px,9vw,52px);font-weight:800;letter-spacing:.1em;line-height:1.1;
+  }
+  .word span{color:var(--ink);transition:color .08s}
+  .word span.done{color:#b9c1cd}
+  .word span.cur{color:var(--red);border-bottom:5px solid var(--red)}
+  .wordmeta{font-size:12px;color:var(--muted);letter-spacing:.1em}
+  .idle .word span{color:#c3cad4}
+
+  .track{
+    width:100%;flex:1;max-height:360px;border:3px solid var(--ink);border-radius:14px;
+    overflow:hidden;display:flex;flex-direction:column;background:var(--road);
+  }
+  .lane{
+    flex:1;position:relative;overflow:hidden;
+    border-bottom:2px dashed #ccd4df;background:var(--road);
+  }
+  .lane:nth-child(even){background:var(--road2)}
+  .lane:last-child{border-bottom:none}
+  .lane::before{
+    content:"";position:absolute;top:50%;left:0;width:200%;height:4px;margin-top:-2px;
+    background:repeating-linear-gradient(90deg,#fff 0 44px,transparent 44px 88px);
+    animation:flow .5s linear infinite;animation-play-state:paused;
+  }
+  .lane.moving::before{animation-play-state:running}
+  @keyframes flow{to{transform:translateX(-88px)}}
+  .lane.me{background:#fff5f7}
+  .racer{
+    position:absolute;top:50%;left:0;
+    width:clamp(36px,8.4vw,50px);height:clamp(36px,8.4vw,50px);
+    margin-top:calc(clamp(36px,8.4vw,50px) / -2);
+    border-radius:50%;background-size:cover;background-position:center;
+    box-shadow:0 0 0 3px #fff,0 0 0 5px var(--ink),0 4px 10px rgba(20,30,60,.25);
+    will-change:left;
+  }
+  .racer.me{box-shadow:0 0 0 3px #fff,0 0 0 5px var(--red),0 4px 12px rgba(225,29,72,.35)}
+  /* 横向きアート版：丸く切り抜かず、透過PNGをそのまま置く */
+  .racer.sideart{
+    width:clamp(50px,12vw,74px);height:clamp(38px,9vw,56px);
+    margin-top:calc(clamp(38px,9vw,56px) / -2);
+    border-radius:0;background-size:contain;background-repeat:no-repeat;
+    box-shadow:none;filter:drop-shadow(0 3px 4px rgba(20,30,60,.3));
+  }
+  .racer.sideart.me{filter:drop-shadow(0 3px 6px rgba(225,29,72,.45))}
+  .racer.bump{animation:bump .16s linear}
+  @keyframes bump{50%{transform:translateY(-6px) rotate(7deg)}}
+  .goal{position:absolute;right:0;top:0;bottom:0;width:16px;border-left:2px solid var(--ink)}
+  .tag{
+    position:absolute;left:8px;top:5px;font-size:11px;font-weight:800;
+    letter-spacing:.06em;color:var(--muted);
+  }
+  .lane.me .tag{color:var(--red)}
+  .hud{
+    width:100%;display:flex;justify-content:space-between;align-items:baseline;
+    font-size:13px;font-weight:700;color:var(--muted);padding:0 2px;
+  }
+  .hud .big{font-size:23px;color:var(--ink);font-variant-numeric:tabular-nums}
+  .hint{font-size:12px;color:var(--muted);height:17px}
+  .boom{
+    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    font-size:clamp(46px,15vw,100px);pointer-events:none;opacity:0;
+  }
+  .boom.play{animation:boom .8s ease-out}
+  @keyframes boom{0%{opacity:1;transform:scale(.4)}100%{opacity:0;transform:scale(2.2)}}
+  #kb{position:absolute;opacity:0;width:1px;height:1px;border:0;padding:0;left:-100px}
+
+  /* ---------- リザルト ---------- */
+  .flagwrap{display:flex;align-items:center;gap:14px}
+  .flagwrap .mini{width:54px;height:38px;border:2px solid var(--ink);border-radius:4px}
+  .place{font-size:23px;font-weight:900;letter-spacing:.06em}
+  .rank{font-size:clamp(60px,19vw,120px);font-weight:900;line-height:1;color:var(--red)}
+  .times{
+    font-size:14px;color:var(--ink);line-height:1.85;font-variant-numeric:tabular-nums;
+    background:#f7f9fc;border:2px solid var(--line);border-radius:12px;padding:11px 20px;
+  }
+  .comment{
+    max-width:440px;font-size:15px;line-height:1.75;font-weight:700;
+    background:#fff8e1;padding:13px 17px;border-radius:12px;
+    border-left:5px solid var(--red);text-align:left;
+  }
+  .row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+  .newbest{color:var(--green);font-weight:900;font-size:14px}
+  .winner{
+    display:none;width:clamp(96px,24vw,150px);
+    animation:cheer 1.1s ease-in-out infinite;
+  }
+  .winner.show{display:block}
+  @keyframes cheer{50%{transform:translateY(-8px) rotate(4deg)}}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- タイトル -->
+  <section id="title" class="screen show">
+    <div class="band top checker wave"></div>
+    <img class="kazu-title" id="titleImg" src="assets/kazu.png" alt="カズ">
+    <div>
+      <div class="logo">カズ<em>レーサー</em></div>
+      <div class="logo-rule checker"></div>
+      <div class="sub">TYPING GRAND PRIX</div>
+    </div>
+    <div class="lead">シグナルが消えたら <b>kazu</b> と打つ。<br>速く打った分だけ、カズが走ります。</div>
+    <button class="btn" id="startBtn">レース開始</button>
+    <div class="best" id="bestLabel"></div>
+    <div class="band bottom checker wave"></div>
+  </section>
+
+  <!-- ゲーム -->
+  <section id="game" class="screen">
+    <div class="lights" id="lights">
+      <div class="lamp"></div><div class="lamp"></div><div class="lamp"></div>
+      <div class="lamp"></div><div class="lamp"></div>
+    </div>
+    <div class="callout" id="callout">シグナル待機…</div>
+    <div class="wordbox idle" id="wordbox">
+      <div class="word" id="word"></div>
+      <div class="wordmeta" id="wordmeta">消灯を待て</div>
+    </div>
+    <div class="track" id="track"></div>
+    <div class="hud">
+      <div id="speedLabel">SPEED 0</div>
+      <div class="big" id="timeLabel">0.00</div>
+    </div>
+    <div class="hint" id="hint">消灯した瞬間に打ち始める！</div>
+    <div class="boom" id="boom">💥</div>
+    <input id="kb" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="latin">
+  </section>
+
+  <!-- リザルト -->
+  <section id="result" class="screen">
+    <div class="band top checker"></div>
+    <div class="flagwrap">
+      <div class="mini checker"></div>
+      <div class="place" id="placeLabel"></div>
+      <div class="mini checker"></div>
+    </div>
+    <img class="winner" id="winnerImg" alt="" src="">
+    <div class="rank" id="rankLabel"></div>
+    <div class="times" id="timesLabel"></div>
+    <div class="newbest" id="newBest"></div>
+    <div class="comment" id="commentLabel"></div>
+    <div class="row">
+      <button class="btn" id="retryBtn">もう一回</button>
+      <button class="btn ghost" id="homeBtn">タイトルへ</button>
+    </div>
+    <div class="band bottom checker"></div>
+  </section>
+
+</div>
+
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+
+  // ===== チューニング =====
+  const TRACK_LEN   = 1000;  // コース距離(単位)
+  const CHAR_BOOST  = 150;   // 1文字正解あたりの加速
+  const WORD_BONUS  = 100;   // 単語を打ち切ったボーナス
+  const MISS_KEEP   = 0.55;  // ミスタイプ時に残る速度の割合
+  const DECAY       = 4.5;   // 減速係数(/秒)
+  const MAX_SPEED   = 300;
+  const RACE_LIMIT  = 25;    // これを超えたらリタイア（手が止まった時の保険）
+  const CPUS = [
+    { name:'カズA', speed:105, hue:130 },
+    { name:'カズB', speed:125, hue:265 },
+    { name:'カズC', speed:145, hue:20  },
+  ];
+  const WORDS = ['kazu','kazu','racer','kazu','laser','kazu','turbo','pit','kazu','boke','engine','kazu','drift','kazu'];
+
+  const COMMENTS = {
+    win: [
+      'カズ、優勝。表彰台で「これ何のレースでしたっけ」と発言。',
+      'ぶっちぎり。ゴール後もそのまま走り続け、現在も行方不明です。',
+      '完全勝利。だが誰もこの大会の主催者を知らない。',
+    ],
+    good: [
+      'カズ、惜しくも2番手。「オレの前にもカズがいた」と困惑。',
+      '好走。ただし全員カズなので、誰が勝っても実質カズの勝ちです。',
+      'いい走りでした。キーボードだけで前に進むとは思えない速度です。',
+    ],
+    bad: [
+      'カズ、直線で自我を失いました。',
+      '3コーナーで自分と抜きつ抜かれつ。相手も自分です。',
+      '完敗。カズ、レース中に一度うどんを食べていた模様。',
+      'ラストスパートでなぜか逆走。観客もつられて逆走。',
+    ],
+    dnf: [
+      'カズ、コース上で寝てしまいました。リタイアです。',
+      '手が止まりました。カズ、途中でエンジンを畳んで帰りました。',
+    ],
+  };
+
+  // ===== 状態 =====
+  const S = { TITLE:'title', SIGNAL:'signal', WAIT:'wait', RACE:'race', DEAD:'dead', RESULT:'result' };
+  let state = S.TITLE;
+  let timers = [];
+  let racers = [];
+  let goAt = 0, reaction = 0, raceStart = 0, rafId = null, lastT = 0, dnf = false;
+  let word = '', typed = 0, chars = 0, miss = 0;
+
+  const lamps    = [...document.querySelectorAll('.lamp')];
+  const trackEl  = $('#track');
+  const calloutEl= $('#callout');
+  const wordEl   = $('#word');
+  const wordBox  = $('#wordbox');
+  const wordMeta = $('#wordmeta');
+  const timeEl   = $('#timeLabel');
+  const speedEl  = $('#speedLabel');
+  const hintEl   = $('#hint');
+
+  // ===== 差し替えアセット =====
+  // assets/ に置かれていれば自動で使う。無ければ kazu.png にフォールバックする。
+  const BASE   = 'assets/kazu.png';
+  const OPT    = { side:'assets/kazu-side.png', helmet:'assets/kazu-helmet.png', flag:'assets/kazu-flag.png' };
+  const have   = { side:false, helmet:false, flag:false };
+  const assetOf = k => have[k] ? OPT[k] : BASE;
+
+  function probeAssets(){
+    Object.entries(OPT).forEach(([k, src]) => {
+      const im = new Image();
+      im.onload  = () => { have[k] = true; if (k === 'helmet') $('#titleImg').src = OPT.helmet; };
+      im.onerror = () => { have[k] = false; };
+      im.src = src;
+    });
+  }
+
+  const clearTimers = () => { timers.forEach(clearTimeout); timers = []; };
+  const later = (fn, ms) => timers.push(setTimeout(fn, ms));
+  const show = id => document.querySelectorAll('.screen')
+    .forEach(el => el.classList.toggle('show', el.id === id));
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+
+  // ===== レーン生成 =====
+  function buildTrack(){
+    trackEl.innerHTML = '';
+    racers = [];
+    const defs = [{ name:'あなた', me:true, hue:0 }, ...CPUS];
+    defs.forEach(def => {
+      const lane = document.createElement('div');
+      lane.className = 'lane' + (def.me ? ' me' : '');
+      const tag = document.createElement('div');
+      tag.className = 'tag';
+      tag.textContent = def.me ? 'YOU' : def.name;
+      const car = document.createElement('div');
+      car.className = 'racer' + (def.me ? ' me' : '') + (have.side ? ' sideart' : '');
+      car.style.backgroundImage = `url(${assetOf('side')})`;
+      const tint = def.hue ? `hue-rotate(${def.hue}deg) saturate(1.35)` : '';
+      const shade = have.side
+        ? `drop-shadow(0 3px 4px rgba(${def.me ? '225,29,72,.45' : '20,30,60,.3'}))` : '';
+      if (tint || shade) car.style.filter = `${tint} ${shade}`.trim();
+      const goal = document.createElement('div');
+      goal.className = 'goal checker';
+      lane.append(tag, car, goal);
+      trackEl.appendChild(lane);
+      racers.push({
+        ...def, el:car, lane, pos:0, speed:0,
+        base:def.speed || 0, phase:Math.random() * 6.28, finish:null, reaction:0,
+      });
+    });
+    draw();
+  }
+
+  function draw(){
+    racers.forEach(r => {
+      const p = Math.min(r.pos / TRACK_LEN, 1);
+      r.el.style.left = `calc(${(p * 100).toFixed(2)}% - ${(p * 62).toFixed(1)}px)`;
+    });
+  }
+
+  // ===== 単語表示 =====
+  function nextWord(){
+    word = pick(WORDS);
+    typed = 0;
+    renderWord();
+  }
+  function renderWord(){
+    wordEl.innerHTML = [...word].map((c, i) =>
+      `<span class="${i < typed ? 'done' : i === typed ? 'cur' : ''}">${c}</span>`).join('');
+  }
+
+  // ===== シグナル =====
+  function startSignal(){
+    state = S.SIGNAL;
+    dnf = false; chars = 0; miss = 0; reaction = 0;
+    lamps.forEach(l => l.classList.remove('on'));
+    calloutEl.className = 'callout';
+    calloutEl.textContent = 'シグナル待機…';
+    hintEl.textContent = '消灯した瞬間に打ち始める！（早すぎるとフライング）';
+    timeEl.textContent = '0.00';
+    speedEl.textContent = 'SPEED 0';
+    wordBox.classList.add('idle');
+    wordMeta.textContent = '消灯を待て';
+    word = 'kazu'; typed = 0; renderWord();
+    buildTrack();
+    try { $('#kb').focus({ preventScroll:true }); } catch(e){}
+
+    lamps.forEach((l, i) => later(() => l.classList.add('on'), 600 * (i + 1)));
+    const wait = 600 * 5 + 500 + Math.random() * 2300;
+    later(() => {
+      lamps.forEach(l => l.classList.remove('on'));
+      calloutEl.className = 'callout go';
+      calloutEl.textContent = 'GO!!';
+      wordBox.classList.remove('idle');
+      wordMeta.textContent = '打て！';
+      goAt = performance.now();
+      state = S.WAIT;
+    }, wait);
+  }
+
+  function jumpStart(){
+    state = S.DEAD;
+    clearTimers();
+    lamps.forEach(l => l.classList.remove('on'));
+    calloutEl.className = 'callout ng';
+    calloutEl.textContent = 'フライング！';
+    hintEl.textContent = 'カズが消し飛びました';
+    racers[0].el.style.opacity = '0';
+    const boom = $('#boom');
+    boom.classList.remove('play');
+    void boom.offsetWidth;
+    boom.classList.add('play');
+    later(() => { racers[0].el.style.opacity = '1'; startSignal(); }, 1600);
+  }
+
+  // ===== レース =====
+  function beginRace(now){
+    reaction = now - goAt;
+    state = S.RACE;
+    raceStart = now;
+    lastT = now;
+    calloutEl.className = 'callout';
+    calloutEl.textContent = `反応 ${Math.round(reaction)}ms`;
+    hintEl.textContent = '打て！打て！打てェ！';
+    racers.forEach(r => r.lane.classList.add('moving'));
+    CPUS.forEach((c, i) => { racers[i + 1].reaction = 150 + Math.random() * 220; });
+    rafId = requestAnimationFrame(loop);
+  }
+
+  function hit(){
+    const me = racers[0];
+    chars++;
+    typed++;
+    me.speed = Math.min(me.speed + CHAR_BOOST, MAX_SPEED);
+    if (typed >= word.length) {
+      me.speed = Math.min(me.speed + WORD_BONUS, MAX_SPEED);
+      nextWord();
+    } else {
+      renderWord();
+    }
+    me.el.classList.remove('bump');
+    void me.el.offsetWidth;
+    me.el.classList.add('bump');
+    wordMeta.textContent = `${chars}打 / ミス ${miss}`;
+  }
+
+  function whiff(){
+    miss++;
+    racers[0].speed *= MISS_KEEP;
+    wordBox.classList.remove('miss');
+    void wordBox.offsetWidth;
+    wordBox.classList.add('miss');
+    wordMeta.textContent = `${chars}打 / ミス ${miss}`;
+  }
+
+  function loop(now){
+    const dt = Math.min((now - lastT) / 1000, 0.05);
+    lastT = now;
+    const elapsed = (now - raceStart) / 1000;
+
+    const me = racers[0];
+    me.speed = Math.max(0, me.speed - me.speed * DECAY * dt);
+    me.pos = Math.min(me.pos + me.speed * dt, TRACK_LEN);
+
+    racers.slice(1).forEach(r => {
+      const wobble = 1 + 0.12 * Math.sin(elapsed * 2 + r.phase);
+      r.pos = Math.min(r.pos + r.base * wobble * dt, TRACK_LEN);
+      if (r.finish === null && r.pos >= TRACK_LEN) r.finish = elapsed + r.reaction / 1000;
+    });
+
+    draw();
+    timeEl.textContent = (elapsed + reaction / 1000).toFixed(2);
+    speedEl.textContent = 'SPEED ' + Math.round(me.speed);
+    racers.forEach(r => r.lane.classList.toggle('moving', r.pos < TRACK_LEN));
+
+    if (me.pos >= TRACK_LEN || elapsed > RACE_LIMIT) {
+      dnf = me.pos < TRACK_LEN;
+      me.finish = dnf ? Infinity : elapsed + reaction / 1000;
+      racers.slice(1).forEach(r => {
+        if (r.finish === null) r.finish = elapsed + (TRACK_LEN - r.pos) / r.base + r.reaction / 1000;
+      });
+      cancelAnimationFrame(rafId);
+      later(finish, 350);
+      return;
+    }
+    rafId = requestAnimationFrame(loop);
+  }
+
+  // ===== リザルト =====
+  function rankOf(t){
+    if (t <= 6.0)  return 'S';
+    if (t <= 7.0)  return 'A';
+    if (t <= 8.0)  return 'B';
+    if (t <= 9.5)  return 'C';
+    if (t <= 11.5) return 'D';
+    return 'E';
+  }
+
+  function finish(){
+    state = S.RESULT;
+    racers.forEach(r => r.lane.classList.remove('moving'));
+    const order = [...racers].sort((a, b) => a.finish - b.finish);
+    const place = order.indexOf(racers[0]) + 1;
+    const total = racers[0].finish;
+    const kps = dnf ? 0 : chars / (total - reaction / 1000);
+
+    $('#placeLabel').textContent = dnf ? 'リタイア' : `${place}位 / ${racers.length}人`;
+    $('#rankLabel').textContent  = dnf ? '－' : rankOf(total);
+    $('#timesLabel').innerHTML =
+      `トータル <b>${dnf ? '--.--' : total.toFixed(2)}秒</b>（反応 ${Math.round(reaction)}ms）<br>` +
+      `${chars}打 / ミス ${miss} / ${kps.toFixed(1)}打・秒<br>` +
+      order.map((r, i) =>
+        `${i + 1}. ${r.me ? '<b>あなた</b>' : r.name} … ${r.finish === Infinity ? 'DNF' : r.finish.toFixed(2) + '秒'}`
+      ).join('<br>');
+
+    const key = 'kazu-racer-best';
+    const best = parseFloat(localStorage.getItem(key) || '0');
+    if (!dnf && (!best || total < best)) {
+      localStorage.setItem(key, total.toFixed(2));
+      $('#newBest').textContent = '★ ベストタイム更新！';
+    } else {
+      $('#newBest').textContent = '';
+    }
+
+    $('#commentLabel').textContent = pick(
+      dnf ? COMMENTS.dnf : place === 1 ? COMMENTS.win : place === 2 ? COMMENTS.good : COMMENTS.bad
+    );
+
+    // 1位のときだけ、旗を持ったカズを出す（アセットがあれば）
+    const win = $('#winnerImg');
+    const champ = !dnf && place === 1 && have.flag;
+    win.classList.toggle('show', champ);
+    if (champ) win.src = OPT.flag;
+
+    show('result');
+  }
+
+  // ===== 入力 =====
+  // IME（日本語入力）がONでも動くように e.code を優先して見る
+  function keyLetter(e){
+    if (e.code && /^Key[A-Z]$/.test(e.code)) return e.code[3].toLowerCase();
+    if (!e.isComposing && e.key && /^[a-zA-Z]$/.test(e.key)) return e.key.toLowerCase();
+    return null;
+  }
+
+  function onKey(e){
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const letter = keyLetter(e);
+
+    if (state === S.SIGNAL) {                 // 消灯前に打った → フライング
+      if (letter || e.code === 'Space') { e.preventDefault(); jumpStart(); }
+      return;
+    }
+    if (state === S.WAIT) {
+      if (!letter) return;
+      e.preventDefault();
+      beginRace(performance.now());
+      if (letter === word[typed]) hit(); else whiff();
+      return;
+    }
+    if (state === S.RACE) {
+      if (!letter) return;
+      e.preventDefault();
+      if (letter === word[typed]) hit(); else whiff();
+      return;
+    }
+    if (state === S.TITLE  && (e.code === 'Enter' || e.code === 'Space')) go();
+    if (state === S.RESULT && (e.code === 'Enter' || e.code === 'Space')) go();
+  }
+  window.addEventListener('keydown', onKey);
+  // スマホ：画面タップでソフトキーボードを呼ぶ
+  $('#game').addEventListener('pointerdown', () => {
+    if (state === S.SIGNAL || state === S.WAIT || state === S.RACE) {
+      try { $('#kb').focus({ preventScroll:true }); } catch(e){}
+    }
+  });
+  $('#kb').addEventListener('input', e => { e.target.value = ''; });
+  // ミス演出は再生し終わったら元に戻す（付けっぱなしだと赤いままになる）
+  wordBox.addEventListener('animationend', () => wordBox.classList.remove('miss'));
+
+  // ===== 画面遷移 =====
+  function toTitle(){
+    clearTimers();
+    cancelAnimationFrame(rafId);
+    state = S.TITLE;
+    const best = localStorage.getItem('kazu-racer-best');
+    $('#bestLabel').textContent = best ? `ベストタイム ${best}秒` : 'まだ記録なし';
+    show('title');
+  }
+  function go(){
+    clearTimers();
+    cancelAnimationFrame(rafId);
+    show('game');
+    startSignal();
+  }
+
+  $('#startBtn').addEventListener('click', go);
+  $('#retryBtn').addEventListener('click', go);
+  $('#homeBtn').addEventListener('click', toTitle);
+
+  probeAssets();
+  toTitle();
+})();
+</script>
+</body>
+</html>
