@@ -199,7 +199,9 @@
   <!-- タイトル -->
   <section id="title" class="screen show">
     <div class="band top checker wave"></div>
-    <img class="kazu-title" id="titleImg" src="assets/kazu.png" alt="カズ">
+    <!-- 初期値をヘルメット版にしておく。無い環境では probeAssets が kazu.png に戻す。
+         ここを kazu.png にすると、結局差し替わるのに毎回 400KB 超を余計に読む。 -->
+    <img class="kazu-title" id="titleImg" src="assets/kazu-helmet.png" alt="カズ">
     <div>
       <div class="logo">カズ<em>レーサー</em></div>
       <div class="logo-rule checker"></div>
@@ -229,7 +231,7 @@
     </div>
     <div class="hint" id="hint">消灯した瞬間に打ち始める！</div>
     <div class="boom" id="boom">💥</div>
-    <input id="kb" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="latin">
+    <input id="kb" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="text">
   </section>
 
   <!-- リザルト -->
@@ -259,11 +261,16 @@
   const $ = s => document.querySelector(s);
 
   // ===== チューニング =====
+  // スマホはソフトキーボードなので 5打/秒 が物理的に出ない。
+  // 加速を上げて減衰を弱め、勝利ラインを PC の約5打/秒 → 約3打/秒 に下げる。
+  // CPU の速度もランクの基準時間も据え置きなので、土俵は同じまま補助だけが入る。
+  const TOUCH = matchMedia('(hover: none) and (pointer: coarse)').matches;
+
   const TRACK_LEN   = 1000;  // コース距離(単位)
-  const CHAR_BOOST  = 150;   // 1文字正解あたりの加速
-  const WORD_BONUS  = 100;   // 単語を打ち切ったボーナス
+  const CHAR_BOOST  = TOUCH ? 260 : 150;   // 1文字正解あたりの加速
+  const WORD_BONUS  = TOUCH ? 175 : 100;   // 単語を打ち切ったボーナス
   const MISS_KEEP   = 0.55;  // ミスタイプ時に残る速度の割合
-  const DECAY       = 4.5;   // 減速係数(/秒)
+  const DECAY       = TOUCH ? 4.2 : 4.5;   // 減速係数(/秒)
   const MAX_SPEED   = 300;
   const RACE_LIMIT  = 25;    // これを超えたらリタイア（手が止まった時の保険）
   const CPUS = [
@@ -324,8 +331,8 @@
   function probeAssets(){
     Object.entries(OPT).forEach(([k, src]) => {
       const im = new Image();
-      im.onload  = () => { have[k] = true; if (k === 'helmet') $('#titleImg').src = OPT.helmet; };
-      im.onerror = () => { have[k] = false; };
+      im.onload  = () => { have[k] = true; };
+      im.onerror = () => { have[k] = false; if (k === 'helmet') $('#titleImg').src = BASE; };
       im.src = src;
     });
   }
@@ -558,6 +565,16 @@
     return null;
   }
 
+  // 1文字ぶんの処理。キーボードからでもソフトキーボードからでもここに集約する。
+  // 拾えたら true を返す（＝呼び出し側は既定動作を止めてよい）。
+  function feedLetter(letter){
+    if (state === S.SIGNAL) { jumpStart(); return true; }   // 消灯前 → フライング
+    if (state === S.WAIT)   { beginRace(performance.now()); }
+    else if (state !== S.RACE) return false;
+    if (letter === word[typed]) hit(); else whiff();
+    return true;
+  }
+
   function onKey(e){
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const letter = keyLetter(e);
@@ -566,30 +583,43 @@
       if (letter || e.code === 'Space') { e.preventDefault(); jumpStart(); }
       return;
     }
-    if (state === S.WAIT) {
+    if (state === S.WAIT || state === S.RACE) {
       if (!letter) return;
+      // ここで preventDefault することで隠し input に文字が入らず、
+      // 後述の input ハンドラと二重に数えられない（PC と iOS はこちらの経路）。
       e.preventDefault();
-      beginRace(performance.now());
-      if (letter === word[typed]) hit(); else whiff();
-      return;
-    }
-    if (state === S.RACE) {
-      if (!letter) return;
-      e.preventDefault();
-      if (letter === word[typed]) hit(); else whiff();
+      feedLetter(letter);
       return;
     }
     if (state === S.TITLE  && (e.code === 'Enter' || e.code === 'Space')) go();
     if (state === S.RESULT && (e.code === 'Enter' || e.code === 'Space')) go();
   }
   window.addEventListener('keydown', onKey);
-  // スマホ：画面タップでソフトキーボードを呼ぶ
-  $('#game').addEventListener('pointerdown', () => {
+
+  // スマホ：画面タップでソフトキーボードを呼ぶ。
+  // pointerdown で focus() しても、続く mousedown の既定動作がフォーカスを
+  // body に戻してしまいキーボードが引っ込む。既定動作を止めて防ぐ。
+  $('#game').addEventListener('pointerdown', e => {
     if (state === S.SIGNAL || state === S.WAIT || state === S.RACE) {
-      try { $('#kb').focus({ preventScroll:true }); } catch(e){}
+      e.preventDefault();
+      try { $('#kb').focus({ preventScroll:true }); } catch(err){}
     }
   });
-  $('#kb').addEventListener('input', e => { e.target.value = ''; });
+  $('#game').addEventListener('mousedown', e => {
+    if (state === S.SIGNAL || state === S.WAIT || state === S.RACE) e.preventDefault();
+  });
+
+  // Android（Gboard など）は予測変換を通すため keydown が key:'Unidentified' /
+  // keyCode:229 になり、実際の文字は input イベントにしか来ない。
+  // ここで拾わないと Android では1打も入らない。**この経路を消さないこと。**
+  // PC と iOS は keydown 側で preventDefault 済みなので value は空のまま＝二重には数えない。
+  $('#kb').addEventListener('input', e => {
+    const typedText = e.target.value;
+    e.target.value = '';
+    for (const ch of typedText.toLowerCase()) {
+      if (ch >= 'a' && ch <= 'z') feedLetter(ch);
+    }
+  });
   // ミス演出は再生し終わったら元に戻す（付けっぱなしだと赤いままになる）
   wordBox.addEventListener('animationend', () => wordBox.classList.remove('miss'));
 
