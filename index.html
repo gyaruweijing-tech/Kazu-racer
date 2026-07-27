@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <title>カズレーサー</title>
+<link rel="icon" href="assets/favicon.png">
 <style>
   :root{
     --bg:#f2f4f8;
@@ -46,6 +47,10 @@
   .band{
     position:absolute;left:0;right:0;height:22px;
     border-top:2px solid var(--ink);border-bottom:2px solid var(--ink);
+    /* ただの飾りなのでクリックを奪わせない。
+       これが無いと、背の低い画面で1位を取ったとき（旗カズのぶん背が伸びる）
+       下のバンドが「もう一回」ボタンに重なって押せなくなる。 */
+    pointer-events:none;
   }
   .band.top{top:0}
   .band.bottom{bottom:0}
@@ -76,6 +81,14 @@
   }
   .btn:active{transform:translateY(4px);box-shadow:0 2px 0 var(--ink)}
   .btn.ghost{background:#fff;color:var(--ink);box-shadow:0 6px 0 #c9d0da}
+  /* 音のオン/オフ。どの画面からも押せるよう最前面に固定する */
+  #muteBtn{
+    position:absolute;top:12px;right:12px;z-index:20;
+    width:40px;height:40px;border:2px solid var(--ink);border-radius:50%;
+    background:#fff;font-size:17px;line-height:1;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;padding:0;
+  }
+  #muteBtn:active{transform:translateY(2px)}
   .best{font-size:13px;color:var(--muted)}
 
   /* ---------- ゲーム ---------- */
@@ -191,10 +204,24 @@
   }
   .winner.show{display:block}
   @keyframes cheer{50%{transform:translateY(-8px) rotate(4deg)}}
+
+  /* ---------- 背の低い画面（ノートPCの 720px など） ----------
+     1位のリザルトは旗カズのぶん縦に伸びて入りきらず、上下が見切れていた。
+     大きい要素だけ詰めて収める。
+     ※ このブロックは必ずスタイルシートの末尾に置くこと。メディアクエリは
+        詳細度を上げないので、.winner / .rank の定義より前に書くと後勝ちで無効になる。 */
+  @media (max-height:800px){
+    .screen{gap:11px;padding:16px}
+    .winner{width:clamp(78px,17vw,100px)}
+    .rank{font-size:clamp(46px,13vw,84px)}
+    .kazu-title{width:clamp(92px,20vw,120px)}
+  }
 </style>
 </head>
 <body>
 <div id="app">
+
+  <button id="muteBtn" type="button" aria-label="音の切り替え">🔊</button>
 
   <!-- タイトル -->
   <section id="title" class="screen show">
@@ -303,6 +330,114 @@
     ],
   };
 
+  // ===== 音 =====
+  // 音声ファイルは一切持たず、全部 Web Audio で合成する（ライブラリゼロの方針のまま）。
+  // ブラウザは操作なしに音を鳴らせないので、AudioContext はボタンを押した中で起こす。
+  const Sound = (() => {
+    const KEY = 'kazu-racer-mute';
+    let ctx = null, master = null, engine = null;
+    let muted = localStorage.getItem(KEY) === '1';
+
+    function wake(){
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;                       // 非対応環境では黙って何もしない
+      if (!ctx) {
+        ctx = new AC();
+        master = ctx.createGain();
+        master.gain.value = muted ? 0 : 0.22;
+        master.connect(ctx.destination);
+      }
+      if (ctx.state === 'suspended') ctx.resume();
+      return ctx;
+    }
+
+    // 単発の音。slide は終端の周波数倍率（1未満で下がる）。
+    function tone(freq, dur, { type = 'square', vol = 1, slide = 0, at = 0 } = {}){
+      if (!ctx || muted) return;
+      const t = ctx.currentTime + at;
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = type;
+      o.frequency.setValueAtTime(freq, t);
+      if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(20, freq * slide), t + dur);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol, t + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(master);
+      o.start(t); o.stop(t + dur + 0.03);
+    }
+
+    // ホワイトノイズ（ミス音・爆発音）
+    function noise(dur, { vol = 1, cut = 1400, at = 0 } = {}){
+      if (!ctx || muted) return;
+      const t = ctx.currentTime + at;
+      const n = Math.max(1, Math.floor(ctx.sampleRate * dur));
+      const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+      const src = ctx.createBufferSource(); src.buffer = buf;
+      const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = cut;
+      const g = ctx.createGain(); g.gain.value = vol;
+      src.connect(f); f.connect(g); g.connect(master);
+      src.start(t);
+    }
+
+    return {
+      wake,
+      get muted(){ return muted; },
+      toggle(){
+        muted = !muted;
+        localStorage.setItem(KEY, muted ? '1' : '0');
+        if (master) master.gain.setTargetAtTime(muted ? 0 : 0.22, ctx.currentTime, 0.02);
+        return muted;
+      },
+
+      lamp(){ tone(520, 0.10, { vol: 0.5 }); },                       // シグナル点灯
+      go(){ tone(1040, 0.30, { vol: 0.6, type: 'square' }); },        // 消灯＝スタート
+      // 打鍵音。単語の中で進むほど少し高くなる
+      hit(i){ tone(620 + i * 85, 0.045, { vol: 0.32, type: 'square' }); },
+      word(){ [0, 0.06, 0.12].forEach((at, i) =>                      // 単語を打ち切った
+        tone([784, 988, 1319][i], 0.12, { vol: 0.3, at })); },
+      miss(){ tone(150, 0.16, { vol: 0.45, type: 'sawtooth', slide: 0.5 });
+              noise(0.10, { vol: 0.25, cut: 700 }); },
+      boom(){ noise(0.45, { vol: 0.8, cut: 500 });                    // フライング
+              tone(90, 0.4, { vol: 0.5, type: 'sawtooth', slide: 0.4 }); },
+
+      // エンジン音。速度に合わせて音程・明るさ・音量が動く
+      engineOn(){
+        if (!ctx || engine) return;
+        const o = ctx.createOscillator(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+        o.type = 'sawtooth'; o.frequency.value = 55;
+        f.type = 'lowpass'; f.frequency.value = 300;
+        g.gain.value = 0.0001;
+        o.connect(f); f.connect(g); g.connect(master);
+        o.start();
+        engine = { o, f, g };
+      },
+      engineAt(speed, max){
+        if (!ctx || !engine) return;
+        const k = Math.min(speed / max, 1), t = ctx.currentTime;
+        engine.o.frequency.setTargetAtTime(55 + 130 * k, t, 0.06);
+        engine.f.frequency.setTargetAtTime(280 + 1700 * k, t, 0.06);
+        engine.g.gain.setTargetAtTime(0.05 + 0.11 * k, t, 0.06);
+      },
+      engineOff(){
+        if (!engine) return;
+        const e = engine; engine = null;
+        if (ctx) e.g.gain.setTargetAtTime(0.0001, ctx.currentTime, 0.10);
+        setTimeout(() => { try { e.o.stop(); } catch (err) {} }, 600);
+      },
+
+      finish(place, dnf){
+        if (dnf) { [0, 0.18, 0.36].forEach((at, i) =>                 // リタイア＝下降
+          tone([392, 330, 247][i], 0.3, { vol: 0.4, type: 'triangle', at })); return; }
+        if (place === 1) [0, 0.11, 0.22, 0.33, 0.5].forEach((at, i) => // 優勝＝ファンファーレ
+          tone([523, 659, 784, 1047, 1319][i], i === 4 ? 0.6 : 0.14, { vol: 0.4, at }));
+        else [0, 0.14].forEach((at, i) =>
+          tone([494, 587][i], 0.22, { vol: 0.35, type: 'triangle', at }));
+      },
+    };
+  })();
+
   // ===== 状態 =====
   const S = { TITLE:'title', SIGNAL:'signal', WAIT:'wait', RACE:'race', DEAD:'dead', RESULT:'result' };
   let state = S.TITLE;
@@ -407,7 +542,7 @@
     buildTrack();
     try { $('#kb').focus({ preventScroll:true }); } catch(e){}
 
-    lamps.forEach((l, i) => later(() => l.classList.add('on'), 600 * (i + 1)));
+    lamps.forEach((l, i) => later(() => { l.classList.add('on'); Sound.lamp(); }, 600 * (i + 1)));
     const wait = 600 * 5 + 500 + Math.random() * 2300;
     later(() => {
       lamps.forEach(l => l.classList.remove('on'));
@@ -417,12 +552,15 @@
       wordMeta.textContent = '打て！';
       goAt = performance.now();
       state = S.WAIT;
+      Sound.go();
     }, wait);
   }
 
   function jumpStart(){
     state = S.DEAD;
     clearTimers();
+    Sound.engineOff();
+    Sound.boom();
     lamps.forEach(l => l.classList.remove('on'));
     calloutEl.className = 'callout ng';
     calloutEl.textContent = 'フライング！';
@@ -446,6 +584,7 @@
     hintEl.textContent = '打て！打て！打てェ！';
     racers.forEach(r => r.lane.classList.add('moving'));
     CPUS.forEach((c, i) => { racers[i + 1].reaction = 150 + Math.random() * 220; });
+    Sound.engineOn();
     rafId = requestAnimationFrame(loop);
   }
 
@@ -454,8 +593,10 @@
     chars++;
     typed++;
     me.speed = Math.min(me.speed + CHAR_BOOST, MAX_SPEED);
+    Sound.hit(typed - 1);
     if (typed >= word.length) {
       me.speed = Math.min(me.speed + WORD_BONUS, MAX_SPEED);
+      Sound.word();
       nextWord();
     } else {
       renderWord();
@@ -469,6 +610,7 @@
   function whiff(){
     miss++;
     racers[0].speed *= MISS_KEEP;
+    Sound.miss();
     wordBox.classList.remove('miss');
     void wordBox.offsetWidth;
     wordBox.classList.add('miss');
@@ -493,6 +635,7 @@
     draw();
     timeEl.textContent = (elapsed + reaction / 1000).toFixed(2);
     speedEl.textContent = 'SPEED ' + Math.round(me.speed);
+    Sound.engineAt(me.speed, MAX_SPEED);
     racers.forEach(r => r.lane.classList.toggle('moving', r.pos < TRACK_LEN));
 
     if (me.pos >= TRACK_LEN || elapsed > RACE_LIMIT) {
@@ -502,6 +645,7 @@
         if (r.finish === null) r.finish = elapsed + (TRACK_LEN - r.pos) / r.base + r.reaction / 1000;
       });
       cancelAnimationFrame(rafId);
+      Sound.engineOff();
       later(finish, 350);
       return;
     }
@@ -525,6 +669,8 @@
     const place = order.indexOf(racers[0]) + 1;
     const total = racers[0].finish;
     const kps = dnf ? 0 : chars / (total - reaction / 1000);
+
+    Sound.finish(place, dnf);
 
     $('#placeLabel').textContent = dnf ? 'リタイア' : `${place}位 / ${racers.length}人`;
     $('#rankLabel').textContent  = dnf ? '－' : rankOf(total);
@@ -626,6 +772,7 @@
   // ===== 画面遷移 =====
   function toTitle(){
     clearTimers();
+    Sound.engineOff();
     cancelAnimationFrame(rafId);
     state = S.TITLE;
     const best = localStorage.getItem('kazu-racer-best');
@@ -633,11 +780,27 @@
     show('title');
   }
   function go(){
+    Sound.wake();               // 音はユーザー操作の中でしか起こせない
     clearTimers();
     cancelAnimationFrame(rafId);
     show('game');
     startSignal();
   }
+
+  const muteBtn = $('#muteBtn');
+  const paintMute = () => { muteBtn.textContent = Sound.muted ? '🔇' : '🔊'; };
+  paintMute();
+  // レース中に押されるとフォーカスがボタンへ移り、スマホで打てなくなる。押した直後に戻す。
+  muteBtn.addEventListener('mousedown', e => e.preventDefault());
+  muteBtn.addEventListener('click', e => {
+    e.stopPropagation();          // タイトルの他の操作を巻き込まない
+    Sound.wake();
+    Sound.toggle();
+    paintMute();
+    if (state === S.SIGNAL || state === S.WAIT || state === S.RACE) {
+      try { $('#kb').focus({ preventScroll:true }); } catch (err) {}
+    }
+  });
 
   $('#startBtn').addEventListener('click', go);
   $('#retryBtn').addEventListener('click', go);
